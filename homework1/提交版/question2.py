@@ -4,6 +4,15 @@ def bounded_star(L, T):
     L: 语言，字符串集合
     T: 上界，最多拼接T个L中的字符串
     """
+    if not isinstance(L, (set, frozenset)):
+        raise TypeError("L 必须是字符串集合（set 或 frozenset）")
+    if any(not isinstance(w, str) for w in L):
+        raise TypeError("L 中的每个元素都必须是字符串")
+    if isinstance(T, bool) or not isinstance(T, int):
+        raise TypeError("T 必须是非负整数，不能是布尔值")
+    if T < 0:
+        raise ValueError("T 不能为负数")
+
     result = set()
 
     def dfs(current, depth):
