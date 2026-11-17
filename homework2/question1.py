@@ -46,11 +46,38 @@ class DFA:
         return f"DFA({self.name})"
 
 
+def _normalize_dfa(a):
+    """把第一题的 DFA 或第二题的 Automaton 统一成本模块的 DFA 视图。
+
+    用鸭子类型，不需要 import C 的 automaton.py：
+      第一题 DFA : start / finals / transitions[(q, symbol)]
+      第二题 Automaton: start_state / accepting_states / transitions[q][symbol]
+    这样 are_equivalent 可以直接接收 C 的 minimize_dfa 返回值做复核。
+    """
+    if hasattr(a, "finals") and hasattr(a, "start"):
+        return a
+    return DFA(
+        name=type(a).__name__,
+        states=a.states,
+        alphabet=a.alphabet,
+        start=a.start_state,
+        finals=a.accepting_states,
+        transitions={
+            (q, symbol): target
+            for q, row in a.transitions.items()
+            for symbol, target in row.items()
+        },
+    )
+
+
 def _find_witness(a1, a2):
     """返回一条“只被其中一个自动机接受”的区分串；若两语言等价则返回 None。
 
     这正是乘积 DFA 中从初态对出发、到达“恰有一个分量为终态”的状态对的路径标签。
     """
+    a1 = _normalize_dfa(a1)
+    a2 = _normalize_dfa(a2)
+
     if a1.alphabet != a2.alphabet:
         return "<字母表不同>"          # 字母表不同则语言不可能相同
 
