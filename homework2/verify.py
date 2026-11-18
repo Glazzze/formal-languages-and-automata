@@ -11,6 +11,9 @@
 """
 
 from itertools import product
+import importlib.util
+import pathlib
+import sys
 
 from question3 import judge
 
@@ -29,7 +32,7 @@ Q1_MACHINE_1 = {
     "F": {"B"},
 }
 
-# 第一题题图：自动机 2，C、D 均为终态，接受全部 0/1 串。
+# 第一题题图：自动机 2，仅 C 为终态；接受 ε 与以 1 结尾的串。
 Q1_MACHINE_2 = {
     "Q": {"C", "D"},
     "SIGMA": {"0", "1"},
@@ -40,7 +43,7 @@ Q1_MACHINE_2 = {
         ("D", "1"): "C",
     },
     "q0": "C",
-    "F": {"C", "D"},
+    "F": {"C"},
 }
 
 # 第二题题图：7 状态 DFA D，终态为 FS2、FS5、FS6。
@@ -295,6 +298,109 @@ def _start_at(dfa, state):
     return dict(dfa, q0=state)
 
 
+def as_dfa_dict(machine):
+    """把组内自动机对象转换为核验用的字典格式。
+
+    支持两种已交付的表示：第一题的 DFA（states/start/finals/transitions）
+    与第二题的 Automaton（states/alphabet/start_state/accepting_states）。
+    """
+    if hasattr(machine, "start_state"):
+        return {
+            "Q": set(machine.states),
+            "SIGMA": set(machine.alphabet),
+            "DELTA": {
+                (state, symbol): machine.transitions[state][symbol]
+                for state in machine.states
+                for symbol in machine.alphabet
+            },
+            "q0": machine.start_state,
+            "F": set(machine.accepting_states),
+        }
+    if hasattr(machine, "finals") and hasattr(machine, "start"):
+        return {
+            "Q": set(machine.states),
+            "SIGMA": set(machine.alphabet),
+            "DELTA": dict(machine.transitions),
+            "q0": machine.start,
+            "F": set(machine.finals),
+        }
+    raise TypeError(f"不支持的对象类型：{type(machine).__name__}")
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _partitions(mapping):
+    groups = {}
+    for state, target in mapping.items():
+        groups.setdefault(target, set()).add(state)
+    return {frozenset(group) for group in groups.values()}
+
+
+def verify_integration():
+    """若 B、C 的代码已交付，则对实际对象执行独立核验。"""
+    print("== 跨题集成核验：组内实际代码 ==")
+    base = pathlib.Path(__file__).resolve().parent
+    member_b = base / "question1.py"
+    member_c = base / "C" / "question2.py"
+    missing = [str(path.relative_to(base)) for path in (member_b, member_c) if not path.exists()]
+    if missing:
+        print(f"  跳过：未找到 {', '.join(missing)}")
+        return
+
+    if str(member_c.parent) not in sys.path:
+        sys.path.insert(0, str(member_c.parent))
+    module_b = _load_module("_member_b_question1", member_b)
+    module_c = _load_module("_member_c_question2", member_c)
+
+    counter_m1, counter_m2 = module_b.build_counterexample()
+    dfa_m1, dfa_m2 = as_dfa_dict(counter_m1), as_dfa_dict(counter_m2)
+    reported = module_b.are_equivalent(counter_m1, counter_m2)
+    independent, witness = equivalent_by_product(dfa_m1, dfa_m2)
+    if reported != independent:
+        raise AssertionError(
+            f"第一题反例：B 判定 {reported}，独立判定 {independent}"
+        )
+    if independent:
+        raise AssertionError("第一题反例应不等价")
+    print(f"  第一题反例：B 与独立判定一致（不等价，区分串 {_show(witness)}）")
+
+    positive_p1, positive_p2 = module_b.build_positive_example()
+    reported = module_b.are_equivalent(positive_p1, positive_p2)
+    independent, witness = equivalent_by_product(
+        as_dfa_dict(positive_p1), as_dfa_dict(positive_p2)
+    )
+    if reported != independent or not independent:
+        raise AssertionError(
+            f"第一题正例：B 判定 {reported}，独立判定 {independent}"
+        )
+    print("  第一题正例：B 与独立判定一致（等价）")
+
+    original = as_dfa_dict(module_c.build_example_dfa_d())
+    minimized_obj, mapping = module_c.minimize_dfa(module_c.build_example_dfa_d())
+    minimized = as_dfa_dict(minimized_obj)
+    check_dfa(original, "C 的题图 D")
+    check_dfa(minimized, "C 的最小化结果")
+    state_count = check_minimality(minimized, "C 的最小化结果")
+    counted = check_question2_short_strings(original, minimized, max_length=8)
+    if not equivalent_by_product(original, minimized)[0]:
+        raise AssertionError("C 的最小化结果与原 DFA 不等价")
+    if _partitions(mapping) != _partitions(merge_mapping(original, minimized)):
+        raise AssertionError("C 的合并映射与独立核验得到的合并关系不一致")
+    print(
+        f"  第二题：C 的最小化结果 {state_count} 个状态，"
+        f"可达且两两可区分，与原 DFA 等价，{counted} 个短串一致"
+    )
+    print(f"  第二题合并关系一致：{sorted((sorted(g) for g in _partitions(mapping)), key=lambda g: g[0])}")
+
+
 def verify_question3_variable_limit():
     """自动审查判定核心的局部变量与递归，辅助人工逐行复核。"""
     print("== 第三题：变量限制审查 ==")
@@ -419,12 +525,8 @@ if __name__ == "__main__":
     verify_question3_exhaustive()
     verify_question1()
     minimum_states, merge = verify_question2()
+    verify_integration()
     print(
-        "第一、二题独立验证完成：题图数据已按 PDF 录入并核对；"
+        "集成核验：B 的 question1.py 与 C 的 question2.py 已与实际对象对照；"
         f"第二题最小状态数 {minimum_states}。"
-    )
-    print(
-        "组内 question1.py、question2.py 交付后，把实际自动机整理为 "
-        "Q/SIGMA/DELTA/q0/F 字典，调用 check_question1_short_strings、"
-        "check_question2_short_strings、check_minimality 与本文件预期对照。"
     )
