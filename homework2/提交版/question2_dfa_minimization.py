@@ -1,9 +1,17 @@
+"""第二题：按状态对标记法最小化 DFA。"""
+
 from __future__ import annotations
 
 from itertools import product
 from typing import Dict, List, Set, Tuple
 
-from automaton import Automaton
+from dfa import Automaton
+from dfa_display import print_minimization
+from dfa_examples import (
+    question2_dfa_d as build_example_dfa_d,
+    question2_merge_dfa as build_custom_merge_dfa,
+    question2_minimal_dfa as build_custom_minimal_dfa,
+)
 
 
 Pair = Tuple[str, str]
@@ -116,96 +124,18 @@ def minimize_dfa(dfa: Automaton) -> Tuple[Automaton, Dict[str, str]]:
     return _build_minimized(dfa, distinguishable_pair_rounds(dfa))
 
 
-def build_example_dfa_d() -> Automaton:
-    """The seven-state DFA D shown in the assignment PDF."""
-    states = ["IS0", "S1", "FS2", "S3", "S4", "FS5", "FS6"]
-    alphabet = ["0", "1"]
-    transitions = {
-        "IS0": {"0": "S1", "1": "S1"},
-        "S1": {"0": "FS2", "1": "FS5"},
-        "FS2": {"0": "IS0", "1": "IS0"},
-        "S3": {"0": "S4", "1": "S4"},
-        "S4": {"0": "FS5", "1": "FS6"},
-        "FS5": {"0": "S3", "1": "S3"},
-        "FS6": {"0": "IS0", "1": "IS0"},
-    }
-    return Automaton(
-        states=states,
-        alphabet=alphabet,
-        start_state="IS0",
-        accepting_states={"FS2", "FS5", "FS6"},
-        transitions=transitions,
-    )
-
-
-def build_custom_merge_dfa() -> Automaton:
-    """A DFA with equivalent accepting states B/C and unreachable state X."""
-    return Automaton(
-        states=["A", "B", "C", "X"],
-        alphabet=["0", "1"],
-        start_state="A",
-        accepting_states={"B", "C"},
-        transitions={
-            "A": {"0": "B", "1": "C"},
-            "B": {"0": "B", "1": "B"},
-            "C": {"0": "C", "1": "C"},
-            "X": {"0": "X", "1": "X"},
-        },
-    )
-
-
-def build_custom_minimal_dfa() -> Automaton:
-    """A minimal two-state DFA accepting strings with an even number of 1s."""
-    return Automaton(
-        states=["E", "O"],
-        alphabet=["0", "1"],
-        start_state="E",
-        accepting_states={"E"},
-        transitions={
-            "E": {"0": "E", "1": "O"},
-            "O": {"0": "O", "1": "E"},
-        },
-    )
-
-
 def print_minimization_report(dfa: Automaton, label: str) -> None:
     rounds = distinguishable_pair_rounds(dfa)
     minimized, mapping = _build_minimized(dfa, rounds)
-    reachable = dfa.reachable_states()
-    unreachable = sorted(set(dfa.states) - set(reachable))
-
-    print(f"\n{label}")
-    print("-" * len(label))
-    dfa.pretty_print("Input DFA")
-    print("\nMarked distinguishable pairs:")
-    if not rounds:
-        print("  None")
-    else:
-        max_round = max(rounds.values())
-        for round_number in range(max_round + 1):
-            pairs = sorted(
-                pair
-                for pair, marked_round in rounds.items()
-                if marked_round == round_number
-            )
-            print(f"  Round {round_number}: {pairs}")
-    print(f"\nUnreachable states removed: {unreachable}")
-    print("Indistinguishable groups / merge mapping:")
-    groups: Dict[str, List[str]] = {}
-    for state in reachable:
-        groups.setdefault(mapping[state], []).append(state)
-    for new_state in minimized.states:
-        print(f"  {new_state} = {{{', '.join(groups[new_state])}}}")
-    minimized.pretty_print("Minimized DFA")
+    print_minimization(dfa, minimized, mapping, rounds, label)
 
 
 def verify_short_words(original: Automaton, minimized: Automaton, max_length: int = 5) -> None:
     """Supplementary bounded check; the pair-marking algorithm is the proof."""
     for length in range(max_length + 1):
         for symbols in product(original.alphabet, repeat=length):
-            word = "".join(symbols)
-            if original.accepts(word) != minimized.accepts(word):
-                raise AssertionError(f"Acceptance mismatch for {word!r}.")
+            if original.accepts(symbols) != minimized.accepts(symbols):
+                raise AssertionError(f"Acceptance mismatch for {symbols!r}.")
 
 
 def run_self_tests() -> None:

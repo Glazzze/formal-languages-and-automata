@@ -1,9 +1,8 @@
 """第三题边界测试，以及第一、二题的跨题独立验证。
 
 题图数据按作业 PDF 第 1、2 页逐条录入；模拟、乘积自动机等价判定和最小性
-检查均在本文件独立实现，因此不依赖 question1.py、question2.py 也能给出
-预期结果。组内代码交付后，把实际自动机整理成同样的字典格式，即可复用本
-文件的检查函数核对输出。
+检查均在本文件独立实现。联调时将第一、二题的实际对象转换成字典格式，
+与独立录入的题图及算法结果对照。
 
 自动机字典格式与作业题面一致：
     {"Q": 状态集合, "SIGMA": 字母表, "DELTA": {(状态, 字符): 状态},
@@ -11,14 +10,13 @@
 """
 
 from itertools import product
-import importlib.util
-import pathlib
-import sys
 
-from question3 import judge
+import question1_dfa_equivalence
+import question2_dfa_minimization
+from question3_stack_membership import judge
 
 
-# 第一题题图（lec4-rs1 第 34 页）：自动机 1，接受以 1 结尾的串。
+# 第一题题图（lec4-rs1 第 34 页）：自动机 1，接受末尾连续 1 的个数为奇数的串。
 Q1_MACHINE_1 = {
     "Q": {"A", "B"},
     "SIGMA": {"0", "1"},
@@ -134,8 +132,7 @@ def words(alphabet, max_length):
     if max_length < 0:
         raise ValueError("max_length 不能为负数")
     for length in range(max_length + 1):
-        for symbols in product(sorted(alphabet), repeat=length):
-            yield "".join(symbols)
+        yield from product(sorted(alphabet), repeat=length)
 
 
 def check_dfa(dfa, name="自动机"):
@@ -163,7 +160,9 @@ def check_dfa(dfa, name="自动机"):
 
 def _show(word):
     """空串显示为 ε，避免打印出空引号。"""
-    return word if word else "ε"
+    if not word:
+        return "ε"
+    return "".join(word) if all(len(symbol) == 1 for symbol in word) else repr(word)
 
 
 def _witness(parent, pair):
@@ -171,7 +170,7 @@ def _witness(parent, pair):
     while parent[pair] is not None:
         pair, symbol = parent[pair]
         symbols.append(symbol)
-    return "".join(reversed(symbols))
+    return tuple(reversed(symbols))
 
 
 def _search(first, second, start, symbols, is_final):
@@ -299,42 +298,18 @@ def _start_at(dfa, state):
 
 
 def as_dfa_dict(machine):
-    """把组内自动机对象转换为核验用的字典格式。
-
-    支持两种已交付的表示：第一题的 DFA（states/start/finals/transitions）
-    与第二题的 Automaton（states/alphabet/start_state/accepting_states）。
-    """
-    if hasattr(machine, "start_state"):
-        return {
-            "Q": set(machine.states),
-            "SIGMA": set(machine.alphabet),
-            "DELTA": {
-                (state, symbol): machine.transitions[state][symbol]
-                for state in machine.states
-                for symbol in machine.alphabet
-            },
-            "q0": machine.start_state,
-            "F": set(machine.accepting_states),
-        }
-    if hasattr(machine, "finals") and hasattr(machine, "start"):
-        return {
-            "Q": set(machine.states),
-            "SIGMA": set(machine.alphabet),
-            "DELTA": dict(machine.transitions),
-            "q0": machine.start,
-            "F": set(machine.finals),
-        }
-    raise TypeError(f"不支持的对象类型：{type(machine).__name__}")
-
-
-def _load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"无法加载 {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    """把公共自动机对象转换成独立核验使用的字典。"""
+    return {
+        "Q": set(machine.states),
+        "SIGMA": set(machine.alphabet),
+        "DELTA": {
+            (state, symbol): target
+            for state, row in machine.transitions.items()
+            for symbol, target in row.items()
+        },
+        "q0": machine.start_state,
+        "F": set(machine.accepting_states),
+    }
 
 
 def _partitions(mapping):
@@ -345,24 +320,13 @@ def _partitions(mapping):
 
 
 def verify_integration():
-    """若 B、C 的代码已交付，则对实际对象执行独立核验。"""
+    """对第一、二题实际运行的自动机执行独立核验。"""
     print("== 跨题集成核验：组内实际代码 ==")
-    base = pathlib.Path(__file__).resolve().parent
-    member_b = base / "question1.py"
-    member_c = base / "C" / "question2.py"
-    missing = [str(path.relative_to(base)) for path in (member_b, member_c) if not path.exists()]
-    if missing:
-        print(f"  跳过：未找到 {', '.join(missing)}")
-        return
-
-    if str(member_c.parent) not in sys.path:
-        sys.path.insert(0, str(member_c.parent))
-    module_b = _load_module("_member_b_question1", member_b)
-    module_c = _load_module("_member_c_question2", member_c)
-
-    counter_m1, counter_m2 = module_b.build_counterexample()
+    counter_m1, counter_m2 = question1_dfa_equivalence.build_counterexample()
     dfa_m1, dfa_m2 = as_dfa_dict(counter_m1), as_dfa_dict(counter_m2)
-    reported = module_b.are_equivalent(counter_m1, counter_m2)
+    if (dfa_m1, dfa_m2) != (Q1_MACHINE_1, Q1_MACHINE_2):
+        raise AssertionError("第一题数据与独立录入的题图不一致")
+    reported = question1_dfa_equivalence.are_equivalent(counter_m1, counter_m2)
     independent, witness = equivalent_by_product(dfa_m1, dfa_m2)
     if reported != independent:
         raise AssertionError(
@@ -372,8 +336,8 @@ def verify_integration():
         raise AssertionError("第一题反例应不等价")
     print(f"  第一题反例：B 与独立判定一致（不等价，区分串 {_show(witness)}）")
 
-    positive_p1, positive_p2 = module_b.build_positive_example()
-    reported = module_b.are_equivalent(positive_p1, positive_p2)
+    positive_p1, positive_p2 = question1_dfa_equivalence.build_positive_example()
+    reported = question1_dfa_equivalence.are_equivalent(positive_p1, positive_p2)
     independent, witness = equivalent_by_product(
         as_dfa_dict(positive_p1), as_dfa_dict(positive_p2)
     )
@@ -383,8 +347,11 @@ def verify_integration():
         )
     print("  第一题正例：B 与独立判定一致（等价）")
 
-    original = as_dfa_dict(module_c.build_example_dfa_d())
-    minimized_obj, mapping = module_c.minimize_dfa(module_c.build_example_dfa_d())
+    original_obj = question2_dfa_minimization.build_example_dfa_d()
+    original = as_dfa_dict(original_obj)
+    if original != Q2_MACHINE_D:
+        raise AssertionError("第二题数据与独立录入的题图不一致")
+    minimized_obj, mapping = question2_dfa_minimization.minimize_dfa(original_obj)
     minimized = as_dfa_dict(minimized_obj)
     check_dfa(original, "C 的题图 D")
     check_dfa(minimized, "C 的最小化结果")
@@ -424,7 +391,8 @@ def _reference_member(word):
 def verify_question3_exhaustive(max_length=8):
     """在 {0,1,a} 上穷举短串，与构造式判定逐一比较。"""
     checked = 0
-    for word in words("01a", max_length):
+    for symbols in words("01a", max_length):
+        word = "".join(symbols)
         if judge(word) != _reference_member(word):
             raise AssertionError(f"第三题穷举不一致：{_show(word)!r}")
         checked += 1
@@ -527,6 +495,6 @@ if __name__ == "__main__":
     minimum_states, merge = verify_question2()
     verify_integration()
     print(
-        "集成核验：B 的 question1.py 与 C 的 question2.py 已与实际对象对照；"
+        "集成核验：B 的 question1_dfa_equivalence.py 与 C 的 question2_dfa_minimization.py 已与实际对象对照；"
         f"第二题最小状态数 {minimum_states}。"
     )

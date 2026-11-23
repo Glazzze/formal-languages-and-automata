@@ -1,15 +1,38 @@
 import unittest
 
-from question2 import (
+from dfa import Automaton
+from question1_dfa_equivalence import _find_witness
+from question2_dfa_minimization import (
     build_custom_merge_dfa,
     build_custom_minimal_dfa,
     build_example_dfa_d,
     minimize_dfa,
     verify_short_words,
 )
+from verify_submission import as_dfa_dict, check_question2_short_strings
 
 
 class MinimizeDfaTests(unittest.TestCase):
+    def test_multicharacter_symbols_keep_their_boundaries(self):
+        dfa = Automaton(
+            ["A", "B"], ["a", "b", "ab"], "A", {"B"},
+            {"A": {"a": "A", "b": "A", "ab": "B"},
+             "B": {"a": "A", "b": "A", "ab": "B"}},
+        )
+        minimized, _ = minimize_dfa(dfa)
+        self.assertTrue(dfa.accepts(("ab",)))
+        self.assertFalse(dfa.accepts(("a", "b")))
+        self.assertFalse(dfa.accepts("ab"))
+        verify_short_words(dfa, minimized, max_length=2)
+        self.assertEqual(check_question2_short_strings(
+            as_dfa_dict(dfa), as_dfa_dict(minimized), max_length=2,
+        ), 13)
+
+        rejecting = Automaton(
+            ["S"], dfa.alphabet, "S", set(), {"S": dict.fromkeys(dfa.alphabet, "S")},
+        )
+        self.assertEqual(_find_witness(dfa, rejecting), ("ab",))
+
     def test_assignment_dfa_has_three_minimal_states(self):
         dfa = build_example_dfa_d()
         minimized, mapping = minimize_dfa(dfa)

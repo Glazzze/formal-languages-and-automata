@@ -160,12 +160,14 @@ class Automaton:
             raise ValueError(f"未知状态 {state!r}。")
         return state in self.accepting_states
 
-    def accepts(self, word: str) -> bool:
-        """Return whether this DFA accepts *word*."""
-        if not isinstance(word, str):
-            raise TypeError("输入串必须是字符串。")
+    def accepts(self, word: Sequence[str]) -> bool:
+        """Read a sequence of symbols. A plain string is read character by character."""
+        if not isinstance(word, Sequence) or isinstance(word, (bytes, bytearray)):
+            raise TypeError("输入必须是字符串或符号序列。")
         current = self.start_state
         for symbol in word:
+            if not isinstance(symbol, str):
+                raise TypeError("输入符号必须是字符串。")
             if symbol not in self.alphabet:
                 raise ValueError(f"输入串含字母表外符号 {symbol!r}。")
             current = self.transitions[current][symbol]
@@ -199,14 +201,9 @@ class Automaton:
     ) -> "Automaton":
         """Build a total DFA from a possibly partial transition table.
 
-        Every missing transition (including a missing row) is sent to
-        ``trap_state``.  The trap state is appended to ``states`` only when it
-        is actually needed.  If ``trap_state`` already names a real state, that
-        state is used as the trap instead of adding a second one.
-
-        This is the single, shared convention for "missing transition means
-        reject"; the strict constructor is left strict so that typos in the
-        homework data are still reported.
+        Missing transitions go to a rejecting sink. An existing trap is
+        reused only if it is non-accepting and its explicit edges are self-loops.
+        Explicit edges to a conflicting state keep their original targets.
         """
         states = _as_str_list(states, "states")
         alphabet = _as_str_list(alphabet, "alphabet")
@@ -214,6 +211,9 @@ class Automaton:
             raise ValueError("trap_state 必须是非空字符串。")
         if not isinstance(transitions, dict):
             raise TypeError("transitions 必须是字典。")
+        accepting_states = set(accepting_states)
+        if not accepting_states.issubset(states):
+            raise ValueError("终态集合包含未知状态。")
 
         raw: Dict[str, Dict[str, str]] = {}
         for state, row in transitions.items():
@@ -241,10 +241,14 @@ class Automaton:
         ):
             needs_trap = True
 
-        if needs_trap and trap_state not in states:
-            states.append(trap_state)
-        if trap_state in states and trap_state not in raw:
-            raw[trap_state] = {}
+        if needs_trap:
+            if trap_state in states and (
+                trap_state in accepting_states
+                or any(target != trap_state for target in raw.get(trap_state, {}).values())
+            ):
+                trap_state = _fresh_state_name(states, trap_state)
+            if trap_state not in states:
+                states.append(trap_state)
 
         total: Dict[str, Dict[str, str]] = {}
         for state in states:
@@ -257,7 +261,7 @@ class Automaton:
             states=states,
             alphabet=alphabet,
             start_state=start_state,
-            accepting_states=set(accepting_states),
+            accepting_states=accepting_states,
             transitions=total,
         )
 

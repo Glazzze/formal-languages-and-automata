@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """成员 A 的公共类基础测试与接口对齐检查。
 
-运行（在 homework2 目录下）：
+运行（在 homework2/提交版 目录下）：
 
-    python -m unittest -v test_automaton
+    python -m unittest -v test_dfa
 
 覆盖四组内容：
 
@@ -16,75 +16,19 @@
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import io
 import itertools
-import sys
 import unittest
-from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-import examples  # noqa: E402
-import question1  # noqa: E402
-from automaton import (  # noqa: E402
+import dfa_examples
+import question1_dfa_equivalence
+import question2_dfa_minimization
+from dfa import (
     TRAP_STATE,
     Automaton,
     common_alphabet,
     normalize_for_equivalence,
 )
-
-
-def _load_c_question2():
-    """按最终提交布局加载 C 的 question2.py（让它导入根目录公共类）。"""
-    path = ROOT / "C" / "question2.py"
-    if not path.exists():
-        return None
-    spec = importlib.util.spec_from_file_location("c_question2", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-C_Q2 = _load_c_question2()
-
-
-def _start(automaton):
-    return (
-        automaton.start_state
-        if hasattr(automaton, "start_state")
-        else automaton.start
-    )
-
-
-def _finals(automaton):
-    return set(
-        automaton.accepting_states
-        if hasattr(automaton, "accepting_states")
-        else automaton.finals
-    )
-
-
-def _structure(automaton):
-    """Return a representation-neutral snapshot for cross-checking data."""
-    states = list(automaton.states)
-    raw = automaton.transitions
-    if raw and all(isinstance(row, dict) for row in raw.values()):
-        transitions = {state: dict(row) for state, row in raw.items()}
-    else:
-        transitions = {state: {} for state in states}
-        for (state, symbol), target in raw.items():
-            transitions.setdefault(state, {})[symbol] = target
-    return (
-        sorted(states),
-        sorted(automaton.alphabet),
-        _start(automaton),
-        _finals(automaton),
-        transitions,
-    )
 
 
 def _words(alphabet, max_length):
@@ -162,7 +106,7 @@ class AutomatonConstructionTests(unittest.TestCase):
         self.assertEqual(dfa.reachable_states(), ["A", "B"])
 
     def test_reachable_states_ignores_unreachable(self):
-        dfa = examples.question2_merge_dfa()
+        dfa = dfa_examples.question2_merge_dfa()
         self.assertEqual(dfa.reachable_states(), ["A", "B", "C"])
 
     def test_pretty_print_contains_all_components(self):
@@ -236,8 +180,36 @@ class AutomatonConstructionTests(unittest.TestCase):
 
 
 class TrapAndAlphabetTests(unittest.TestCase):
+    def test_from_partial_does_not_reuse_accepting_trap_name(self):
+        dfa = Automaton.from_partial(
+            ["A", TRAP_STATE], ["0", "1"], "A", {TRAP_STATE},
+            {"A": {"0": TRAP_STATE}},
+        )
+        sink = dfa.delta("A", "1")
+        self.assertNotEqual(sink, TRAP_STATE)
+        self.assertEqual(dfa.transitions[sink], {"0": sink, "1": sink})
+        self.assertTrue(dfa.accepts("0"))
+        self.assertFalse(dfa.accepts("1"))
+        self.assertFalse(dfa.accepts("10"))
+
+    def test_from_partial_does_not_reuse_trap_with_outgoing_edge(self):
+        dfa = Automaton.from_partial(
+            ["A", TRAP_STATE], ["0", "1"], "A", {"A"},
+            {"A": {"0": TRAP_STATE}, TRAP_STATE: {"0": "A"}},
+        )
+        self.assertTrue(dfa.accepts("00"))
+        self.assertFalse(dfa.accepts("10"))
+
+    def test_from_partial_reuses_existing_rejecting_sink(self):
+        dfa = Automaton.from_partial(
+            ["A", TRAP_STATE], ["0", "1"], "A", {"A"},
+            {"A": {"0": "A"}, TRAP_STATE: {"0": TRAP_STATE}},
+        )
+        self.assertEqual(dfa.states, ["A", TRAP_STATE])
+        self.assertFalse(dfa.accepts("1"))
+
     def test_from_partial_adds_trap_and_preserves_language(self):
-        dfa = examples.partial_endswith_1()
+        dfa = dfa_examples.partial_endswith_1()
         self.assertIn(TRAP_STATE, dfa.states)
         self.assertEqual(dfa.transitions[TRAP_STATE], {"0": TRAP_STATE, "1": TRAP_STATE})
         self.assertTrue(dfa.accepts("1"))
@@ -268,7 +240,7 @@ class TrapAndAlphabetTests(unittest.TestCase):
             )
 
     def test_complete_to_union_alphabet_preserves_old_language(self):
-        dfa = examples.epsilon_only(["0"])
+        dfa = dfa_examples.epsilon_only(["0"])
         completed = dfa.complete_to(["0", "1"])
         self.assertEqual(completed.alphabet, ["0", "1"])
         self.assertIn(TRAP_STATE, completed.states)
@@ -282,21 +254,21 @@ class TrapAndAlphabetTests(unittest.TestCase):
 
     def test_common_alphabet_sorted_union(self):
         self.assertEqual(
-            common_alphabet(examples.question1_m1(), examples.empty_language(["a"])),
+            common_alphabet(dfa_examples.question1_m1(), dfa_examples.empty_language(["a"])),
             ["0", "1", "a"],
         )
 
     def test_normalize_different_alphabet_equal_language(self):
-        left = examples.epsilon_only(["0"])
-        right = examples.epsilon_only(["0", "1"])
+        left = dfa_examples.epsilon_only(["0"])
+        right = dfa_examples.epsilon_only(["0", "1"])
         left, right = normalize_for_equivalence(left, right)
         self.assertEqual(left.alphabet, right.alphabet)
         self.assertEqual(left.alphabet, ["0", "1"])
         _assert_same_language(self, left, right)
 
     def test_normalize_different_alphabet_empty_languages(self):
-        left = examples.empty_language(["0"])
-        right = examples.empty_language(["1"])
+        left = dfa_examples.empty_language(["0"])
+        right = dfa_examples.empty_language(["1"])
         left, right = normalize_for_equivalence(left, right)
         _assert_same_language(self, left, right)
 
@@ -306,33 +278,27 @@ class TrapAndAlphabetTests(unittest.TestCase):
 
 
 class FigureDataTests(unittest.TestCase):
-    def test_m1_and_m2_match_question1_builders(self):
-        self.assertEqual(_structure(examples.question1_m1()),
-                         _structure(question1.build_counterexample()[0]))
-        self.assertEqual(_structure(examples.question1_m2()),
-                         _structure(question1.build_counterexample()[1]))
-
     def test_m1_is_not_simply_ends_with_one(self):
-        m1 = examples.question1_m1()
-        m2 = examples.question1_m2()
+        m1 = dfa_examples.question1_m1()
+        m2 = dfa_examples.question1_m2()
         self.assertTrue(m1.accepts("1"))
         self.assertTrue(m1.accepts("01"))
         self.assertTrue(m1.accepts("101"))
         self.assertFalse(m1.accepts("11"))
+        self.assertTrue(m1.accepts("111"))
         self.assertFalse(m1.accepts("011"))
         self.assertFalse(m1.accepts(""))
         self.assertTrue(m2.accepts(""))
         self.assertTrue(m2.accepts("11"))
 
-    def test_positive_example_matches_question1_builders(self):
-        p1, p2 = examples.question1_positive_example()
-        b1, b2 = question1.build_positive_example()
-        self.assertEqual(_structure(p1), _structure(b1))
-        self.assertEqual(_structure(p2), _structure(b2))
-        _assert_same_language(self, p1, p2, max_length=6)
+    def test_positive_example_accepts_words_ending_in_zero(self):
+        p1, p2 = question1_dfa_equivalence.build_positive_example()
+        for word in _words(["0", "1"], max_length=6):
+            self.assertEqual(p1.accepts(word), word.endswith("0"))
+            self.assertEqual(p2.accepts(word), word.endswith("0"))
 
     def test_dfa_d_has_expected_table(self):
-        dfa = examples.question2_dfa_d()
+        dfa = dfa_examples.question2_dfa_d()
         self.assertEqual(
             dfa.states, ["IS0", "S1", "FS2", "S3", "S4", "FS5", "FS6"]
         )
@@ -352,30 +318,23 @@ class FigureDataTests(unittest.TestCase):
         self.assertEqual(dfa.transitions, expected)
         self.assertEqual(sorted(dfa.reachable_states()), sorted(dfa.states))
 
-    @unittest.skipUnless(C_Q2, "C/question2.py 尚未交付")
-    def test_dfa_d_matches_c_builder(self):
-        self.assertEqual(_structure(examples.question2_dfa_d()),
-                         _structure(C_Q2.build_example_dfa_d()))
-
-    @unittest.skipUnless(C_Q2, "C/question2.py 尚未交付")
-    def test_custom_examples_match_c_builders(self):
-        self.assertEqual(_structure(examples.question2_merge_dfa()),
-                         _structure(C_Q2.build_custom_merge_dfa()))
-        self.assertEqual(_structure(examples.question2_minimal_dfa()),
-                         _structure(C_Q2.build_custom_minimal_dfa()))
-
 
 class InterfaceAlignmentTests(unittest.TestCase):
     def test_question1_accepts_shared_automaton(self):
-        m1, m2 = examples.question1_counterexample()
-        p1, p2 = examples.question1_positive_example()
-        self.assertFalse(question1.are_equivalent(m1, m2))
-        self.assertTrue(question1.are_equivalent(p1, p2))
+        m1, m2 = dfa_examples.question1_counterexample()
+        p1, p2 = dfa_examples.question1_positive_example()
+        self.assertFalse(question1_dfa_equivalence.are_equivalent(m1, m2))
+        self.assertTrue(question1_dfa_equivalence.are_equivalent(p1, p2))
 
-    @unittest.skipUnless(C_Q2, "C/question2.py 尚未交付")
+    def test_equivalence_over_different_alphabets(self):
+        left = dfa_examples.epsilon_only(["0"])
+        right = dfa_examples.epsilon_only(["0", "1"])
+        self.assertTrue(question1_dfa_equivalence.are_equivalent(left, right))
+        self.assertFalse(question1_dfa_equivalence.are_equivalent(left, dfa_examples.empty_language(["0", "1"])))
+
     def test_c_minimization_uses_shared_class(self):
-        dfa = examples.question2_dfa_d()
-        minimized, mapping = C_Q2.minimize_dfa(dfa)
+        dfa = dfa_examples.question2_dfa_d()
+        minimized, mapping = question2_dfa_minimization.minimize_dfa(dfa)
         self.assertIsInstance(minimized, Automaton)
         self.assertEqual(minimized.states, ["Q0", "Q1", "Q2"])
         self.assertEqual(minimized.alphabet, ["0", "1"])
@@ -383,16 +342,15 @@ class InterfaceAlignmentTests(unittest.TestCase):
         self.assertEqual(minimized.accepting_states, {"Q0"})
         self.assertEqual(mapping["IS0"], mapping["S3"])
         self.assertEqual(mapping["S1"], mapping["S4"])
-        self.assertTrue(question1.are_equivalent(dfa, minimized))
+        self.assertTrue(question1_dfa_equivalence.are_equivalent(dfa, minimized))
 
-    @unittest.skipUnless(C_Q2, "C/question2.py 尚未交付")
     def test_c_minimization_is_detected_when_broken(self):
         from dataclasses import replace
 
-        dfa = examples.question2_dfa_d()
-        minimized, _ = C_Q2.minimize_dfa(dfa)
+        dfa = dfa_examples.question2_dfa_d()
+        minimized, _ = question2_dfa_minimization.minimize_dfa(dfa)
         wrong = replace(minimized, accepting_states=set())
-        self.assertFalse(question1.are_equivalent(dfa, wrong))
+        self.assertFalse(question1_dfa_equivalence.are_equivalent(dfa, wrong))
 
 
 if __name__ == "__main__":
